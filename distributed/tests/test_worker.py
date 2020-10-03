@@ -27,15 +27,10 @@ from distributed import (
     wait,
 )
 from distributed.compatibility import WINDOWS
-from distributed.core import rpc, CommClosedError
+from distributed.core import rpc, CommClosedError, Status
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
-from distributed.worker import (
-    Worker,
-    error_message,
-    logger,
-    parse_memory_limit,
-)
+from distributed.worker import Worker, error_message, logger, parse_memory_limit
 from distributed.utils import tmpfile, TimeoutError
 from distributed.utils_test import (  # noqa: F401
     cleanup,
@@ -343,7 +338,7 @@ async def test_worker_waits_for_scheduler(cleanup):
         pass
     else:
         assert False
-    assert w.status not in ("closed", "running")
+    assert w.status not in (Status.closed, Status.running)
     await w.close(timeout=0.1)
 
 
@@ -534,7 +529,7 @@ async def test_close_on_disconnect(s, w):
     await s.close()
 
     start = time()
-    while w.status != "closed":
+    while w.status != Status.closed:
         await asyncio.sleep(0.01)
         assert time() < start + 5
 
@@ -801,7 +796,7 @@ async def test_worker_death_timeout(s):
     assert "Worker" in str(info.value)
     assert "timed out" in str(info.value) or "failed to start" in str(info.value)
 
-    assert w.status == "closed"
+    assert w.status == Status.closed
 
 
 @gen_cluster(client=True)
@@ -863,6 +858,15 @@ def test_worker_dir(worker):
             assert len(set(directories)) == 2  # distinct
 
         test_worker_dir()
+
+
+@gen_cluster(nthreads=[])
+async def test_false_worker_dir(s):
+    async with Worker(s.address, local_directory="") as w:
+        local_directory = w.local_directory
+
+    cwd = os.getcwd()
+    assert os.path.dirname(local_directory) == os.path.join(cwd, "dask-worker-space")
 
 
 @gen_cluster(client=True)
@@ -1560,7 +1564,7 @@ async def test_close_gracefully(c, s, a, b):
 
     await b.close_gracefully()
 
-    assert b.status == "closed"
+    assert b.status == Status.closed
     assert b.address not in s.workers
     assert mem.issubset(set(a.data))
     for key in proc:
@@ -1575,7 +1579,7 @@ async def test_lifetime(cleanup):
             async with Client(s.address, asynchronous=True) as c:
                 futures = c.map(slowinc, range(200), delay=0.1)
                 await asyncio.sleep(1.5)
-                assert b.status != "running"
+                assert b.status != Status.running
                 await b.finished()
 
                 assert set(b.data).issubset(a.data)  # successfully moved data over
@@ -1639,7 +1643,24 @@ async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
 
                 await w.heartbeat()
                 if reconnect:
-                    assert w.status == "running"
+                    assert w.status == Status.running
                 else:
-                    assert w.status == "closed"
+                    assert w.status == Status.closed
     assert "Heartbeat to scheduler failed" in logger.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_bad_local_directory(cleanup):
+    async with await Scheduler() as s:
+        try:
+            async with Worker(s.address, local_directory="/not/a/valid-directory"):
+                pass
+        except PermissionError:
+            pass
+        else:
+            if WINDOWS:
+                pass
+            else:
+                assert False
+
+        assert not any("error" in log for log in s.get_logs())

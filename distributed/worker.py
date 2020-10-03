@@ -92,7 +92,7 @@ SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "ta
 
 
 class Worker(ServerNode):
-    """ Worker node in a Dask distributed cluster
+    """Worker node in a Dask distributed cluster
 
     Workers perform two functions:
 
@@ -482,11 +482,10 @@ class Worker(ServerNode):
             warnings.warn("The local_dir keyword has moved to local_directory")
             local_directory = local_dir
 
-        if local_directory is None:
+        if not local_directory:
             local_directory = dask.config.get("temporary-directory") or os.getcwd()
 
-        if not os.path.exists(local_directory):
-            os.makedirs(local_directory)
+        os.makedirs(local_directory, exist_ok=True)
         local_directory = os.path.join(local_directory, "dask-worker-space")
 
         with warn_on_duration(
@@ -628,7 +627,7 @@ class Worker(ServerNode):
             "steal-request": self.steal_request,
         }
 
-        super(Worker, self).__init__(
+        super().__init__(
             handlers=handlers,
             stream_handlers=stream_handlers,
             io_loop=self.loop,
@@ -646,7 +645,7 @@ class Worker(ServerNode):
         pc = PeriodicCallback(self.heartbeat, 1000)
         self.periodic_callbacks["heartbeat"] = pc
         pc = PeriodicCallback(
-            lambda: self.batched_stream.send({"op": "keep-alive"}), 60000,
+            lambda: self.batched_stream.send({"op": "keep-alive"}), 60000
         )
         self.periodic_callbacks["keep-alive"] = pc
 
@@ -658,7 +657,7 @@ class Worker(ServerNode):
         if self.memory_limit:
             self._memory_monitoring = False
             pc = PeriodicCallback(
-                self.memory_monitor, self.memory_monitor_interval * 1000,
+                self.memory_monitor, self.memory_monitor_interval * 1000
             )
             self.periodic_callbacks["memory"] = pc
 
@@ -707,20 +706,17 @@ class Worker(ServerNode):
     ##################
 
     def __repr__(self):
-        return (
-            "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>"
-            % (
-                self.__class__.__name__,
-                self.address,
-                self.name,
-                self.status,
-                len(self.data),
-                len(self.executing),
-                self.nthreads,
-                len(self.ready),
-                len(self.in_flight_tasks),
-                len(self.waiting_for_data),
-            )
+        return "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>" % (
+            self.__class__.__name__,
+            self.address,
+            self.name,
+            self.status,
+            len(self.data),
+            len(self.executing),
+            self.nthreads,
+            len(self.ready),
+            len(self.in_flight_tasks),
+            len(self.waiting_for_data),
         )
 
     @property
@@ -849,8 +845,8 @@ class Worker(ServerNode):
         else:
             await asyncio.gather(
                 *[
-                    self.plugin_add(plugin=plugin)
-                    for plugin in response["worker-plugins"]
+                    self.plugin_add(**plugin_kwargs)
+                    for plugin_kwargs in response["worker-plugins"]
                 ]
             )
 
@@ -961,6 +957,7 @@ class Worker(ServerNode):
         if load:
             try:
                 import_file(out_filename)
+                cache_loads.data.clear()
             except Exception as e:
                 logger.exception(e)
                 return {"status": "error", "exception": to_serialize(e)}
@@ -1180,7 +1177,7 @@ class Worker(ServerNode):
         return "OK"
 
     async def close_gracefully(self):
-        """ Gracefully shut down a worker
+        """Gracefully shut down a worker
 
         This first informs the scheduler that we're shutting down, and asks it
         to move our data elsewhere.  Afterwards, we close as normal
@@ -1314,7 +1311,7 @@ class Worker(ServerNode):
             }
         )
 
-        return "dont-reply"
+        return Status.dont_reply
 
     ###################
     # Local Execution #
@@ -1883,7 +1880,7 @@ class Worker(ServerNode):
             except PicklingError:
                 # Some types fail pickling (example: _thread.lock objects),
                 # send their name as a best effort.
-                typ_serialized = pickle.dumps(typ.__name__)
+                typ_serialized = pickle.dumps(typ.__name__, protocol=4)
             d = {
                 "op": "task-finished",
                 "status": "OK",
@@ -2336,7 +2333,7 @@ class Worker(ServerNode):
     # xref: https://github.com/dask/distributed/issues/3938
     @gen.coroutine
     def executor_submit(self, key, function, args=(), kwargs=None, executor=None):
-        """ Safely run function in thread pool executor
+        """Safely run function in thread pool executor
 
         We've run into issues running concurrent.future futures within
         tornado.  Apparently it's advantageous to use timeouts and periodic
@@ -2616,7 +2613,7 @@ class Worker(ServerNode):
     ##################
 
     async def memory_monitor(self):
-        """ Track this process's memory usage and act accordingly
+        """Track this process's memory usage and act accordingly
 
         If we rise above 70% memory use, start dumping data to disk.
 
@@ -2988,7 +2985,7 @@ class Worker(ServerNode):
                 return self._get_client()
 
     def _get_client(self, timeout=3):
-        """ Get local client attached to this worker
+        """Get local client attached to this worker
 
         If no such client exists, create one
 
@@ -3029,7 +3026,7 @@ class Worker(ServerNode):
         return self._client
 
     def get_current_task(self):
-        """ Get the key of the task we are currently running
+        """Get the key of the task we are currently running
 
         This only makes sense to run within a task
 
@@ -3051,7 +3048,7 @@ class Worker(ServerNode):
 
 
 def get_worker():
-    """ Get the worker currently running this task
+    """Get the worker currently running this task
 
     Examples
     --------
@@ -3072,7 +3069,7 @@ def get_worker():
         return thread_state.execution_state["worker"]
     except AttributeError:
         try:
-            return first(w for w in Worker._instances if w.status == "running")
+            return first(w for w in Worker._instances if w.status == Status.running)
         except StopIteration:
             raise ValueError("No workers found")
 
@@ -3172,7 +3169,7 @@ def secede():
 
 
 class Reschedule(Exception):
-    """ Reschedule this task
+    """Reschedule this task
 
     Raising this exception will stop the current execution of the task and ask
     the scheduler to reschedule this task, possibly on a different machine.
@@ -3215,7 +3212,7 @@ async def get_data_from_worker(
     serializers=None,
     deserializers=None,
 ):
-    """ Get keys from worker
+    """Get keys from worker
 
     The worker has a two step handshake to acknowledge when data has been fully
     delivered.  This function implements that handshake.
@@ -3294,7 +3291,7 @@ def _deserialize(function=None, args=None, kwargs=None, task=no_value):
 
 
 def execute_task(task):
-    """ Evaluate a nested task
+    """Evaluate a nested task
 
     >>> inc = lambda x: x + 1
     >>> execute_task((inc, 1))
@@ -3322,17 +3319,17 @@ def dumps_function(func):
         with _cache_lock:
             result = cache_dumps[func]
     except KeyError:
-        result = pickle.dumps(func)
+        result = pickle.dumps(func, protocol=4)
         if len(result) < 100000:
             with _cache_lock:
                 cache_dumps[func] = result
     except TypeError:  # Unhashable function
-        result = pickle.dumps(func)
+        result = pickle.dumps(func, protocol=4)
     return result
 
 
 def dumps_task(task):
-    """ Serialize a dask task
+    """Serialize a dask task
 
     Returns a dict of bytestrings that can each be loaded with ``loads``
 
@@ -3367,7 +3364,7 @@ _warn_dumps_warned = [False]
 
 def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
     """ Dump an object to bytes, warn if those bytes are large """
-    b = dumps(obj)
+    b = dumps(obj, protocol=4)
     if not _warn_dumps_warned[0] and len(b) > limit:
         _warn_dumps_warned[0] = True
         s = str(obj)
@@ -3397,7 +3394,7 @@ def apply_function(
     active_threads_lock,
     time_delay,
 ):
-    """ Run a function, collect information
+    """Run a function, collect information
 
     Returns
     -------
@@ -3437,7 +3434,7 @@ def apply_function(
 def apply_function_actor(
     function, args, kwargs, execution_state, key, active_threads, active_threads_lock
 ):
-    """ Run a function, collect information
+    """Run a function, collect information
 
     Returns
     -------
@@ -3460,7 +3457,7 @@ def apply_function_actor(
 
 
 def get_msg_safe_str(msg):
-    """ Make a worker msg, which contains args and kwargs, safe to cast to str:
+    """Make a worker msg, which contains args and kwargs, safe to cast to str:
     allowing for some arguments to raise exceptions during conversion and
     ignoring them.
     """
@@ -3482,7 +3479,7 @@ def get_msg_safe_str(msg):
 
 
 def convert_args_to_str(args, max_len=None):
-    """ Convert args to a string, allowing for some arguments to raise
+    """Convert args to a string, allowing for some arguments to raise
     exceptions during conversion and ignoring them.
     """
     length = 0
@@ -3501,7 +3498,7 @@ def convert_args_to_str(args, max_len=None):
 
 
 def convert_kwargs_to_str(kwargs, max_len=None):
-    """ Convert kwargs to a string, allowing for some arguments to raise
+    """Convert kwargs to a string, allowing for some arguments to raise
     exceptions during conversion and ignoring them.
     """
     length = 0
