@@ -17,7 +17,7 @@ import pytest
 from dask.system import CPU_COUNT
 from distributed import Client, Worker, Nanny, get_client
 from distributed.core import Status
-from distributed.deploy.local import LocalCluster, nprocesses_nthreads
+from distributed.deploy.local import LocalCluster
 from distributed.metrics import time
 from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (  # noqa: F401
@@ -815,19 +815,6 @@ def test_local_tls_restart(loop):
             assert workers_before != workers_after
 
 
-def test_default_process_thread_breakdown():
-    assert nprocesses_nthreads(1) == (1, 1)
-    assert nprocesses_nthreads(4) == (4, 1)
-    assert nprocesses_nthreads(5) == (5, 1)
-    assert nprocesses_nthreads(8) == (4, 2)
-    assert nprocesses_nthreads(12) in ((6, 2), (4, 3))
-    assert nprocesses_nthreads(20) == (5, 4)
-    assert nprocesses_nthreads(24) in ((6, 4), (8, 3))
-    assert nprocesses_nthreads(32) == (8, 4)
-    assert nprocesses_nthreads(40) in ((8, 5), (10, 4))
-    assert nprocesses_nthreads(80) in ((10, 8), (16, 5))
-
-
 def test_asynchronous_property(loop):
     with LocalCluster(
         4,
@@ -986,6 +973,8 @@ async def test_repr(cleanup):
         memory_limit="2GB",
         asynchronous=True,
     ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            await client.wait_for_workers(2)
         text = repr(cluster)
         assert "workers=2" in text
         assert cluster.scheduler_address in text

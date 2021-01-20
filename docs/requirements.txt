@@ -2,7 +2,7 @@ numpydoc
 tornado
 toolz
 cloudpickle
-dask
+dask>=2020.12.0
 sphinx
-dask_sphinx_theme
+dask-sphinx-theme>=1.3.5
 sphinx-click
